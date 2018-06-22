@@ -320,7 +320,7 @@ def prelude(static=False):
 <body onload="addHeaderTags()">
 """
                 % args
-            ).encode("utf-8")
+            )
         )
     else:
         return (
@@ -1106,7 +1106,6 @@ def markup(query):
     #  (in case this is a mac document)
     data = re.sub("([^\n])\r([^\n])", "\g<1>\n\g<2>", data)
     # Strip \r (in case this is a ms format document):
-    data = string.replace(data, "\r", "")
 
     # -------------
     # Normalization

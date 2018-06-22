@@ -39,8 +39,8 @@
 #
 
 
-import cgi, os, sys, requests, re, string, cgitb, datetime
-from flask import Flask
+import cgi, os, sys, requests, re, string, cgitb, datetime, json
+from flask import Flask, request
 app = Flask(__name__)
 
 try:
@@ -84,63 +84,39 @@ args[
     "style"
 ] = """
     <style type="text/css">
-        @media only screen 
-          and (min-width: 992px)
-          and (max-width: 1199px) {
-            body { font-size: 14pt; }
-            div.content { width: 96ex; margin: 0 auto; }
-        }
-        @media only screen 
-          and (min-width: 768px)
-          and (max-width: 991px) {
-            body { font-size: 14pt; }
-            div.content { width: 96ex; margin: 0 auto; }
-        }
-        @media only screen 
-          and (min-width: 480px)
-          and (max-width: 767px) {
-            body { font-size: 11pt; }
-            div.content { width: 96ex; margin: 0 auto; }
-        }
-        @media only screen 
-          and (max-width: 479px) {
-            body { font-size: 8pt; }
-            div.content { width: 96ex; margin: 0 auto; }
-        }
-        @media only screen 
-          and (min-device-width : 375px) 
-          and (max-device-width : 667px) {
-            body { font-size: 9.5pt; }
-            div.content { width: 96ex; margin: 0 1px; }
-        }
-        @media only screen 
-          and (min-device-width: 1200px) {
-            body { font-size: 10pt; margin: 0 4em; }
-            div.content { width: 96ex; margin: 0; }
+        body {
+            max-width: 640px;
+            line-height: 1.5;
+            padding: 2em;
+            font-size: 1em;
+            color: #222;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-family: -apple-system, BlinkMacSystemFont, avenir next, avenir, helvetica neue, helvetica, Ubuntu, roboto, noto, segoe ui, arial, sans-serif;;
         }
         h1, h2, h3, h4, h5, h6, .h1, .h2, .h3, .h4, .h5, .h6 {
             font-weight: bold;
-            line-height: 0pt;
-            display: inline;
             white-space: pre;
-            font-family: monospace;
             font-size: 1em;
             font-weight: bold;
+            line-height: 1.5;
         }
-        pre {
-            font-size: 1em;
-            margin-top: 0px;
-            margin-bottom: 0px;
+        section {
+            white-space: pre;
+        }
+        a {
+            color: inherit;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        a:hover {
+            background: #eee;
         }
         .pre {
             white-space: pre;
-            font-family: monospace;
         }
         .header{
             font-weight: bold;
-        }
-        .newpage {
-            page-break-before: always;
         }
         .invisible {
             text-decoration: none;
@@ -149,23 +125,6 @@ args[
         a.selflink {
           color: black;
           text-decoration: none;
-        }
-        @media print {
-            body {
-                font-family: monospace;
-                font-size: 10.5pt;
-            }
-            h1, h2, h3, h4, h5, h6 {
-                font-size: 1em;
-            }
-        
-            a:link, a:visited {
-                color: inherit;
-                text-decoration: none;
-            }
-            .noprint {
-                display: none;
-            }
         }
         @media screen {
             .grey, .grey a:link, .grey a:visited {
@@ -192,14 +151,6 @@ args[
             .cplate   { font-size: 70%; border: solid grey 1px; }
         }
     </style>
-    <!--[if IE]>
-    <style>
-    body {
-       font-size: 13px;
-       margin: 10px 10px;
-    }
-    </style>
-    <![endif]-->
 """
 
 
@@ -312,12 +263,7 @@ MAINTAINER
 
 def prelude(static=False):
     if int(args.get("header", "1")):
-        if os.environ.get("GATEWAY_INTERFACE", "") and not static:
-            print(
-                "Content-type: text/html; charset=utf-8\nCache-Control: max-age=86400\n"
-            )
-
-        sys.stdout.write(
+        return (
             (
                 """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
   "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -372,27 +318,12 @@ def prelude(static=False):
     </script>
 </head>
 <body onload="addHeaderTags()">
-  <div class="content">
-   <div style="height: 13px;">
-      <div onmouseover="this.style.cursor='pointer';"
-         onclick="showElem('legend');"
-         onmouseout="hideElem('legend')"
-         style="height: 6px; position: absolute;"
-         class="pre noprint docinfo %(doccolor)s"
-         title="Click for colour legend." >                                                                        </div>
-      <div id="legend"
-           class="docinfo noprint pre legend"
-           style="position:absolute; top: 4px; left: 4ex; visibility:hidden; background-color: white; padding: 4px 9px 5px 7px; border: solid #345 1px; "
-           onmouseover="showElem('legend');"
-           onmouseout="hideElem('legend');">
-      </div>
-   </div>
 """
                 % args
             ).encode("utf-8")
         )
     else:
-        print(
+        return (
             """<html><body>
    <!-- %(script)s version %(version)s -->
    %(style)s
@@ -461,15 +392,14 @@ def untaint(str):
     return re.sub("[\001-\010\013\014\016-\031!$&%`<|>\177-\240]", "_", str)
 
 
-def value(fields, key, badchar=r"[^:/A-Za-z0-9_.-]+"):
-    val = fields[key].value
+def value(query, key, badchar=r"[^:/A-Za-z0-9_.-]+"):
+    val = query[key]
     # remove possible meta characters from a string
     return re.sub(badchar, " ", val)
 
 
-def markup():
+def markup(query):
     global args
-    #        sys.stderr = sys.stdout
     extra = ""
     bcp = None
     std = None
@@ -479,32 +409,20 @@ def markup():
     charter = None
     info = {}
     attribs = {}
-    fields = cgi.FieldStorage()
-    for key in list(fields.keys()):
-        attribs[key] = value(fields, key)
 
     script = os.environ.get("SCRIPT_NAME", sys.argv[0])
 
-    if "info" in fields:
-        info = value(fields, "info")
+    if "info" in query:
+        info = value(query, "info")
         if info == "usage":
             usage()
         if info == "version":
             version()
         return
-
-    if "--info" in fields:
-        info = value(fields, "--info")
-        if info == "usage":
-            print(usagetext)
-        if info == "version":
-            print("%(script)s version %(version)s" % args)
-        return
-
-    if "repository" in fields:
-        rfcs = value(fields, "repository") + "/rfc"
-        ids = value(fields, "repository") + "/internet-drafts"
-        extra = extra + "repository=%s&amp;" % value(fields, "repository")
+    if "repository" in query:
+        rfcs = value(query, "repository") + "/rfc"
+        ids = value(query, "repository") + "/internet-drafts"
+        extra = extra + "repository=%s&amp;" % value(query, "repository")
     else:
         if os.path.exists("/home/ietf/rfc"):
             rfcs = "file:///home/ietf/rfc"
@@ -515,89 +433,89 @@ def markup():
         else:
             ids = "https://tools.ietf.org/id"
 
-    if "rfc-repository" in fields:
-        rfcs = value(fields, "rfc-repository")
-        extra = extra + "rfc-repository=%s&amp;" % value(fields, "rfc-repository")
+    if "rfc-repository" in query:
+        rfcs = value(query, "rfc-repository")
+        extra = extra + "rfc-repository=%s&amp;" % value(query, "rfc-repository")
 
-    if "id-repository" in fields:
-        ids = value(fields, "id-repository")
-        extra = extra + "id-repository=%s&amp;" % value(fields, "id-repository")
+    if "id-repository" in query:
+        ids = value(query, "id-repository")
+        extra = extra + "id-repository=%s&amp;" % value(query, "id-repository")
 
-    if "header" in fields:
-        args["header"] = value(fields, "header")
+    if "header" in query:
+        args["header"] = value(query, "header")
 
-    if "blurb" in fields:
-        args["blurb"] = value(fields, "blurb")
+    if "blurb" in query:
+        args["blurb"] = value(query, "blurb")
 
-    if "style" in fields:
-        args["style"] = value(fields, "style")
+    if "style" in query:
+        args["style"] = value(query, "style")
 
-    if "docinfo" in fields:
+    if "docinfo" in query:
         # Eval this to get a boolean or integer, instead of a string "0" or "False"
-        args["docinfo"] = eval(value(fields, "docinfo").capitalize())
+        args["docinfo"] = eval(value(query, "docinfo").capitalize())
 
-    if "robots" in fields:
-        args["robots"] = value(fields, "robots")
+    if "robots" in query:
+        args["robots"] = value(query, "robots")
     else:
         args["robots"] = "index,nofollow"
 
-    if "staticpath" in fields:
-        optstatic = value(fields, "staticpath")
+    if "staticpath" in query:
+        optstatic = value(query, "staticpath")
         if optstatic == "true":
             optstatic = "."
         args["robots"] = "index,follow"
     else:
         optstatic = False
 
-    if "topmenu" in fields:
-        optmenu = value(fields, "topmenu") == "true"
-        # extra = extra + "topmenu=%s&amp;" % value(fields, "topmenu")
+    if "topmenu" in query:
+        optmenu = value(query, "topmenu") == "true"
+        # extra = extra + "topmenu=%s&amp;" % value(query, "topmenu")
     else:
         optmenu = False
-    if "lineoffset" in fields:
-        optlineoffs = int(value(fields, "lineoffset"))
-        # extra = extra + "topmenu=%s&amp;" % value(fields, "topmenu")
+    if "lineoffset" in query:
+        optlineoffs = int(value(query, "lineoffset"))
+        # extra = extra + "topmenu=%s&amp;" % value(query, "topmenu")
     else:
         optlineoffs = 0
 
     # Handle document information.
-    if "draft" in fields:
-        url = "%s/%s" % (ids, value(fields, "draft"))
-        args["title"] = value(fields, "draft")[6:].split(".")[0]
+    if "draft" in query:
+        url = "%s/%s" % (ids, value(query, "draft"))
+        args["title"] = value(query, "draft")[6:].split(".")[0]
     #            if not url[-4:] == ".txt":
     #                url = url + ".txt"
-    elif "rfc" in fields:
-        rfc = value(fields, "rfc")
+    elif "rfc" in query:
+        rfc = query["rfc"]
         url = "%s/rfc%s.txt" % (rfcs, rfc)
-        args["title"] = "rfc " + value(fields, "rfc")
+        args["title"] = "rfc " + value(query, "rfc")
         args["doc"] = "rfc" + rfc
-    elif "bcp" in fields:
-        bcp = value(fields, "bcp")
+    elif "bcp" in query:
+        bcp = value(query, "bcp")
         url = "%s/bcp/bcp%s.txt" % (rfcs, bcp)
-        args["title"] = "bcp " + value(fields, "bcp")
+        args["title"] = "bcp " + value(query, "bcp")
         args["doc"] = "bcp" + bcp
-    elif "fyi" in fields:
-        fyi = value(fields, "fyi")
+    elif "fyi" in query:
+        fyi = value(query, "fyi")
         url = "%s/fyi/fyi%s.txt" % (rfcs, fyi)
-        args["title"] = "fyi " + value(fields, "fyi")
+        args["title"] = "fyi " + value(query, "fyi")
         args["doc"] = "fyi" + fyi
-    elif "std" in fields:
-        std = value(fields, "std")
+    elif "std" in query:
+        std = value(query, "std")
         url = "%s/std/std%s.txt" % (rfcs, std)
-        args["title"] = "std " + value(fields, "std")
+        args["title"] = "std " + value(query, "std")
         args["doc"] = "std" + std
-    elif "url" in fields:
-        url = value(fields, "url")
+    elif "url" in query:
+        url = value(query, "url")
         if not re.match("^(http|https|ftp|file)", url):
             url = "https://%s%s/%s" % (
                 os.environ.get("SERVER_NAME", "ietf.levkowetz.com"),
                 os.path.dirname(script),
                 url,
             )
-        args["title"] = os.path.basename(value(fields, "url"))
-    elif "doc" in fields or os.environ.get("PATH_INFO", "/") != "/":
-        if "doc" in fields:
-            doc = value(fields, "doc")
+        args["title"] = os.path.basename(value(query, "url"))
+    elif "doc" in query or os.environ.get("PATH_INFO", "/") != "/":
+        if "doc" in query:
+            doc = value(query, "doc")
         else:
             doc = os.environ.get("PATH_INFO", "/")[1:]
         # Remove extension
@@ -653,14 +571,6 @@ def markup():
             title = ""
 
         args["title"] = title
-
-    elif script == "rfcmarkup":
-        usage()
-        # print "<pre>"
-        # print fields
-        # print os.environ
-        # print "</pre>"
-        return
     else:
         prelude()
         print(
@@ -688,31 +598,23 @@ def markup():
         )
         return
 
-    if "title" in fields:
-        args["title"] = value(fields, "title")
+    if "title" in query:
+        args["title"] = value(query, "title")
 
-    if "extrastyle" in fields:
+    if "extrastyle" in query:
         args["extrastyle"] = (
-            "<style>" + value(fields, "extrastyle", r"[^-A-Za-z0-9 ;._]") + "</style>"
+            "<style>" + value(query, "extrastyle", r"[^-A-Za-z0-9 ;._]") + "</style>"
         )
 
     tags = []
-    if "comments" in fields:
-        if type(fields["comments"]) is type([]):
-            for item in fields["comments"]:
+    if "comments" in query:
+        if type(query["comments"]) is type([]):
+            for item in query["comments"]:
                 tags.append(item.value)
         else:
-            tags.append(value(fields, "comments"))
+            tags.append(value(query, "comments"))
 
-    colors = []
-    if "color" in fields:
-        if type(fields["color"]) is type([]):
-            for item in fields["color"]:
-                colors.append(item.value)
-        else:
-            colors.append(untaint(value(fields, "color")))
-    else:
-        colors = ["#F00", "#0A0", "#00C", "#880", "#088", "#808"]
+    colors = ["#F00", "#0A0", "#00C", "#880", "#088", "#808"]
 
     if url.startswith("file:///home/ietf/"):
         start = len("file:///home/ietf/") - 1
@@ -722,19 +624,9 @@ def markup():
 
     # Get the raw text of the source page
     try:
-        f = urllib.request.urlopen(url)
-        data = f.read()
-        try:
-            data = data.decode(f.headers.getparam("charset") or "utf-8")
-        except UnicodeDecodeError:
-            try:
-                data = data.decode("latin1")
-            except TypeError:
-                pass
-        except TypeError:
-            pass
-        f.close()
+        data = requests.get(url).text
     except:
+        print(e)
         prelude()
         print(
             "<h3> &nbsp; &nbsp; Sorry, couldn't find '%s'</h3>" % os.path.basename(url)
@@ -1119,7 +1011,7 @@ def markup():
         args["obsolete"] = chartermeta(charter, "Versions:", 0, attribs)
 
     elif rfc:
-        attribs.update(stateinfo("rfc%s" % (rfc)))
+        # attribs.update(stateinfo("rfc%s" % (rfc)))TODO: what is this?
         args["favicon"] = "/images/rfc.png"
         if filetext("/home/ietf/rfc/meta/rfc%s.errata" % rfc):
             # Errata URL changes around 18 Oct 2007
@@ -1206,12 +1098,6 @@ def markup():
         args["doccolor"] = "bggreen"
 
     args = setdcmeta(attribs, args)
-
-    if f.info().gettype() == "text/html":
-        print("Location: %s\n" % url)
-        #            print f.info()
-        #            print data
-        return
 
     # ------------------------------------------------------------------------
     # Start of markup handling
@@ -1596,7 +1482,7 @@ def markup():
     # greying out the page headers and footers
     data = re.sub(
         "\n(.+\[Page \w+\])\n\f\n(.+)\n",
-        """\n<span class="grey">\g<1></span>\n\f\n<span class="grey">\g<2></span>\n""",
+        """\n\n\f\n\n""",
         data,
     )
 
@@ -1642,8 +1528,8 @@ def markup():
         )
         # contents link markup: page numbers
         data = re.sub(
-            "(?i)(\. ?\. +|\. \. \.|\.\.\. *)([0-9ivxlc]+)( *\n)",
-            '\g<1><a href="#page-\g<2>">\g<2></a>\g<3>',
+            "^(.*)(\. \. \.)(.*)",
+            '',
             data,
         )
 
@@ -1846,10 +1732,18 @@ def markup():
     #
     # data = re.sub("\f", "<div class=\"newpage\" />", data)
     data = re.sub(
-        "\n?\f\n?",
-        "</pre>\n<hr class='noprint' style='width: 96ex;' align='left'/><!--NewPage--><pre class='newpage'>",
+        "\n*\f\n*",
+        "</section>\n<!--NewPage--><section>",
         data,
     )
+
+    data = re.sub(
+        "\n{3,}",
+        "\n\n",
+        data,
+    )
+
+    data = "\n".join([n for n in data.split('\n') if not '. . .' in n or 'Table of Contents' in n])
 
     # restore indentation
     if prefixlen:
@@ -1860,7 +1754,7 @@ def markup():
         data = re.sub("%s\?draft=" % script, "%s/" % optstatic, data)
 
     # output modified data
-    prelude(optstatic)
+    data = prelude(optstatic) + data
     if optmenu:
         if draftname:
             args["draftname"] = draftname
@@ -1903,9 +1797,9 @@ def markup():
         sys.stdout.write(docinfo % args)
     else:
         sys.stdout.write(noinfo)
-    print(data.encode("utf-8"))
+    return data
     postlude()
 
 @app.route("/")
 def hello():
-    return "Hello World!"
+    return markup(request.args)
